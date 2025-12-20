@@ -39,7 +39,7 @@ def main():
         return
     
     try:
-        activities = garmin.get_activities(0, 1000)
+        activities = garmin.get_activities(0, 20)
     except Exception as e:
         print(f"❌ Fehler beim Abrufen der Aktivitäten: {e}")
         return
