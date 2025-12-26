@@ -5,17 +5,15 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 
 def create_dashboard():
-    print("📊 Analysiere Daten für das Jahres-Dashboard...")
+    print("📊 Erstelle zusammengefasstes Jahres-Dashboard...")
     
-    # Umgebungsvariablen laden
     google_creds_json = os.environ.get('GOOGLE_CREDENTIALS')
     sheet_id = os.environ.get('SHEET_ID')
     
     if not all([google_creds_json, sheet_id]):
-        print("❌ Fehlende Google Credentials oder Sheet ID!")
+        print("❌ Fehler: Google Credentials oder Sheet ID fehlen!")
         return
 
-    # Google Sheets Verbindung
     creds_dict = json.loads(google_creds_json)
     creds = Credentials.from_service_account_info(
         creds_dict, 
@@ -23,66 +21,82 @@ def create_dashboard():
     )
     client = gspread.authorize(creds)
     
+    # Mapping-Logik für Hauptkategorien
+    CATEGORY_MAP = {
+        # Cycling
+        'cycling': 'Cycling', 'road_biking': 'Cycling', 'gravel_cycling': 'Cycling', 
+        'virtual_ride': 'Cycling', 'mountain_biking': 'Cycling',
+        # Running
+        'running': 'Running', 'street_running': 'Running', 'trail_running': 'Running', 
+        'track_running': 'Running',
+        # Swimming
+        'lap_swimming': 'Swimming', 'open_water_swimming': 'Swimming', 'swimming': 'Swimming',
+        # Hiking & Walking
+        'hiking': 'Hiking/Walking', 'walking': 'Hiking/Walking',
+        # Fitness & Indoor
+        'strength_training': 'Fitness/Indoor', 'indoor_cardio': 'Fitness/Indoor', 
+        'pilates': 'Fitness/Indoor', 'mobility': 'Fitness/Indoor', 'yoga': 'Fitness/Indoor',
+        # Wintersport
+        'backcountry_skiing': 'Skiing', 'resort_skiing': 'Skiing', 'nordic_skiing': 'Skiing'
+    }
+
     try:
-        # Haupt-Datenblatt öffnen (Tabellenblatt1)
         main_sheet = client.open_by_key(sheet_id).sheet1
         records = main_sheet.get_all_records()
         
         if not records:
-            print("⚠️ Keine Daten im Hauptblatt gefunden.")
+            print("⚠️ Keine Daten gefunden.")
             return
             
         df = pd.DataFrame(records)
         
-        # 1. Datenbereinigung
-        # Datum in echtes Datum umwandeln
+        # Daten-Vorbereitung
         df['Datum'] = pd.to_datetime(df['Datum'], errors='coerce')
-        df = df.dropna(subset=['Datum']) # Zeilen ohne Datum entfernen
+        df = df.dropna(subset=['Datum'])
         df['Jahr'] = df['Datum'].dt.year
         
-        # Numerische Spalten sicherstellen
-        for col in ['km', 'kcal', 'Gewicht', 'HM']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        # Spalten in Zahlen umwandeln
+        df['km'] = pd.to_numeric(df['km'], errors='coerce').fillna(0)
+        df['HM'] = pd.to_numeric(df['HM'], errors='coerce').fillna(0)
 
-        # 2. Aggregation: Statistiken pro Jahr und Sportart
-        summary = df.groupby(['Jahr', 'Typ']).agg({
+        # HAUPTKATEGORIE ZUWEISEN
+        # Wir nehmen den TypKey und schauen im Mapping nach. Falls nicht gefunden -> "Other"
+        df['Hauptkategorie'] = df['Typ'].apply(lambda x: CATEGORY_MAP.get(x.lower(), 'Other'))
+
+        # Aggregation nach Jahr und Hauptkategorie
+        summary = df.groupby(['Jahr', 'Hauptkategorie']).agg({
             'km': 'sum',
-            'kcal': 'sum',
-            'HM': 'sum',
-            'Gewicht': lambda x: round(x[x > 0].mean(), 2) if any(x > 0) else 0
+            'HM': 'sum'
         }).reset_index()
 
-        # Sortierung: Neuestes Jahr zuerst
-        summary = summary.sort_values(by=['Jahr'], ascending=False)
+        # Sortierung: Neuestes Jahr zuerst, dann nach Kategorie Name
+        summary = summary.sort_values(by=['Jahr', 'Hauptkategorie'], ascending=[False, True])
 
-        # 3. Dashboard-Blatt aktualisieren
+        # Dashboard-Blatt ansteuern
         try:
-            # Prüfen ob Blatt existiert, sonst erstellen
             dashboard_sheet = client.open_by_key(sheet_id).worksheet("Dashboard")
         except gspread.exceptions.WorksheetNotFound:
-            dashboard_sheet = client.open_by_key(sheet_id).add_worksheet(title="Dashboard", rows="100", cols="10")
+            dashboard_sheet = client.open_by_key(sheet_id).add_worksheet(title="Dashboard", rows="100", cols="5")
 
         dashboard_sheet.clear()
         
-        # Header und Daten vorbereiten
-        header = [["GARMIN JAHRES-DASHBOARD (Automatisch aktualisiert)"], 
-                  ["Stand:", pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')], 
-                  []]
+        # Header schreiben
+        header = [
+            ["MEIN SPORT-DASHBOARD (KOMPAKT)"],
+            ["Zusammengefasst nach Hauptkategorien"],
+            ["Stand:", pd.Timestamp.now().strftime('%d.%m.%Y %H:%M')],
+            []
+        ]
         
-        # Spaltennamen für die Tabelle
-        table_header = [["Jahr", "Sportart", "Gesamt KM", "Gesamt Kcal", "Höhenmeter", "Ø Gewicht"]]
-        
-        # Daten in Liste umwandeln
+        table_header = [["Jahr", "Kategorie", "Gesamt KM", "Höhenmeter"]]
         table_data = summary.values.tolist()
         
-        # Alles ins Sheet schreiben
         dashboard_sheet.update("A1", header + table_header + table_data)
         
-        print(f"✅ Dashboard erfolgreich aktualisiert! ({len(table_data)} Einträge)")
+        print(f"✅ Dashboard mit {len(table_data)} Kategorien-Summen aktualisiert.")
 
     except Exception as e:
-        print(f"❌ Fehler beim Erstellen des Dashboards: {e}")
+        print(f"❌ Fehler: {e}")
 
 if __name__ == "__main__":
     create_dashboard()
