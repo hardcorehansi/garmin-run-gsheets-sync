@@ -5,7 +5,7 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 
 def create_dashboard():
-    print("📊 Erstelle zusammengefasstes Jahres-Dashboard...")
+    print("📊 Erstelle kompaktes Jahres-Dashboard (Hauptkategorien)...")
     
     google_creds_json = os.environ.get('GOOGLE_CREDENTIALS')
     sheet_id = os.environ.get('SHEET_ID')
@@ -50,27 +50,30 @@ def create_dashboard():
             
         df = pd.DataFrame(records)
         
-        # Daten-Vorbereitung
+        # 1. Daten-Vorbereitung
         df['Datum'] = pd.to_datetime(df['Datum'], errors='coerce')
         df = df.dropna(subset=['Datum'])
         df['Jahr'] = df['Datum'].dt.year
         
-        # Spalten in Zahlen umwandeln
+        # 2. Einheiten korrigieren & sicherstellen (KM und HM)
         df['km'] = pd.to_numeric(df['km'], errors='coerce').fillna(0)
         df['HM'] = pd.to_numeric(df['HM'], errors='coerce').fillna(0)
 
-        # HAUPTKATEGORIE ZUWEISEN
-        # Wir nehmen den TypKey und schauen im Mapping nach. Falls nicht gefunden -> "Other"
-        df['Hauptkategorie'] = df['Typ'].apply(lambda x: CATEGORY_MAP.get(x.lower(), 'Other'))
+        # 3. Hauptkategorie zuweisen
+        df['Kategorie'] = df['Typ'].apply(lambda x: CATEGORY_MAP.get(str(x).lower(), 'Other'))
 
-        # Aggregation nach Jahr und Hauptkategorie
-        summary = df.groupby(['Jahr', 'Hauptkategorie']).agg({
+        # 4. Aggregation nach Jahr und Hauptkategorie
+        summary = df.groupby(['Jahr', 'Kategorie']).agg({
             'km': 'sum',
             'HM': 'sum'
         }).reset_index()
 
-        # Sortierung: Neuestes Jahr zuerst, dann nach Kategorie Name
-        summary = summary.sort_values(by=['Jahr', 'Hauptkategorie'], ascending=[False, True])
+        # 5. Runden für saubere Darstellung
+        summary['km'] = summary['km'].apply(lambda x: round(float(x), 2))
+        summary['HM'] = summary['HM'].apply(lambda x: int(float(x)))
+
+        # Sortierung: Neuestes Jahr zuerst, dann nach KM-Leistung
+        summary = summary.sort_values(by=['Jahr', 'km'], ascending=[False, False])
 
         # Dashboard-Blatt ansteuern
         try:
@@ -82,21 +85,22 @@ def create_dashboard():
         
         # Header schreiben
         header = [
-            ["MEIN SPORT-DASHBOARD (KOMPAKT)"],
-            ["Zusammengefasst nach Hauptkategorien"],
+            ["SPORT-DASHBOARD: JAHRESÜBERSICHT"],
+            ["Einheit: Kilometer (km) / Höhenmeter (m)"],
             ["Stand:", pd.Timestamp.now().strftime('%d.%m.%Y %H:%M')],
             []
         ]
         
-        table_header = [["Jahr", "Kategorie", "Gesamt KM", "Höhenmeter"]]
+        table_header = [["Jahr", "Kategorie", "Gesamt KM", "Gesamt HM"]]
         table_data = summary.values.tolist()
         
+        # Alles ins Sheet schreiben
         dashboard_sheet.update("A1", header + table_header + table_data)
         
-        print(f"✅ Dashboard mit {len(table_data)} Kategorien-Summen aktualisiert.")
+        print(f"✅ Dashboard erfolgreich aktualisiert. Alles auf KM und HM bereinigt.")
 
     except Exception as e:
-        print(f"❌ Fehler: {e}")
+        print(f"❌ Fehler im Dashboard-Skript: {e}")
 
 if __name__ == "__main__":
     create_dashboard()
