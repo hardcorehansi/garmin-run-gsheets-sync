@@ -23,7 +23,7 @@ def calculate_speed_and_pace(distance_meters, duration_seconds):
     return f"{pace_min}:{pace_sec:02d}", speed_kmh
 
 def main():
-    print("Starte High-End Garmin Sync (Final Version)...")
+    print("🚀 Starte Garmin 2 GDrive Sync (Ultra-Robust Version)...")
     
     # Umgebungsvariablen laden
     garmin_email = os.environ.get('GARMIN_EMAIL')
@@ -32,18 +32,18 @@ def main():
     sheet_id = os.environ.get('SHEET_ID')
     
     if not all([garmin_email, garmin_password, google_creds_json, sheet_id]):
-        print("❌ Fehlende Umgebungsvariablen")
+        print("❌ Fehlende Umgebungsvariablen!")
         return
     
     try:
         garmin = Garmin(garmin_email, garmin_password)
         garmin.login()
-        print("✅ Garmin verbunden")
+        print("✅ Garmin Login erfolgreich")
     except Exception as e:
         print(f"❌ Garmin Login Fehler: {e}")
         return
     
-    # Aktivitäten abrufen
+    # Letzte Aktivitäten abrufen
     activities = garmin.get_activities(0, 15)
 
     # Google Sheets Verbindung
@@ -70,6 +70,7 @@ def main():
                 continue
 
             act_date = start_time[:10]
+            print(f"🔍 Verarbeite: {act_date} - {activity_name}...")
 
             # --- GESUNDHEITSDATEN SEKTION ---
             weight = 0
@@ -82,38 +83,48 @@ def main():
                 stats = garmin.get_stats(act_date)
                 rhr = stats.get('restingHeartRate', 0)
                 
-                # 2. Gewicht (Mehrstufige Abfrage)
-                body_data = garmin.get_body_composition(act_date)
+                # 2. Gewicht (ULTRA-ROBUSTE SUCHE)
                 weight_raw = None
                 
-                if body_data:
-                    # Checke Liste (Standard-API) oder Direkt-Feld
-                    if 'bodyCompositionList' in body_data and body_data['bodyCompositionList']:
-                        weight_raw = body_data['bodyCompositionList'][0].get('weight')
-                    else:
-                        weight_raw = body_data.get('totalWeight') or body_data.get('weight')
+                # Versuch A: Body Composition für den Tag
+                try:
+                    body_data = garmin.get_body_composition(act_date)
+                    if body_data:
+                        if 'bodyCompositionList' in body_data and body_data['bodyCompositionList']:
+                            weight_raw = body_data['bodyCompositionList'][0].get('weight') or body_data['bodyCompositionList'][0].get('totalWeight')
+                        else:
+                            weight_raw = body_data.get('totalWeight') or body_data.get('weight')
+                except:
+                    pass
 
-                # Fallback: Wenn kein Gewicht für den Tag, nimm das letzte aus dem Profil
+                # Versuch B: Globales User Profil (wenn A fehlgeschlagen)
                 if not weight_raw:
                     profile = garmin.get_user_profile()
-                    weight_raw = profile.get('weight', 0)
+                    weight_raw = profile.get('weight') or profile.get('weightInGrams') or profile.get('userProfile', {}).get('weight')
 
+                # Umrechnung Gramm -> KG
                 if weight_raw:
                     weight = round(weight_raw / 1000, 2) if weight_raw > 1000 else round(weight_raw, 2)
                 
                 # 3. HRV (Herzfrequenzvariabilität)
-                hrv_data = garmin.get_hrv_data(act_date)
-                if hrv_data:
-                    hrv = hrv_data.get('hrvSummary', {}).get('lastNightAvg', 'N/A')
+                try:
+                    hrv_data = garmin.get_hrv_data(act_date)
+                    if hrv_data:
+                        hrv = hrv_data.get('hrvSummary', {}).get('lastNightAvg', 'N/A')
+                except:
+                    hrv = 'N/A'
                 
                 # 4. Schlafzeit
-                sleep_data = garmin.get_sleep_data(act_date)
-                if sleep_data:
-                    sleep_seconds = sleep_data.get('dailySleepDTO', {}).get('sleepTimeSeconds', 0)
-                    sleep_hours = format_sleep(sleep_seconds)
+                try:
+                    sleep_data = garmin.get_sleep_data(act_date)
+                    if sleep_data:
+                        sleep_seconds = sleep_data.get('dailySleepDTO', {}).get('sleepTimeSeconds', 0)
+                        sleep_hours = format_sleep(sleep_seconds)
+                except:
+                    sleep_hours = 0
 
             except Exception as health_e:
-                print(f"⚠️ Hinweis: Teilweise Gesundheitsdaten für {act_date} nicht verfügbar.")
+                print(f"⚠️ Hinweis: Gesundheitsdaten teilweise nicht gefunden für {act_date}")
 
             # --- AKTIVITÄTSDATEN SEKTION ---
             dist_m = activity.get('distance', 0)
@@ -121,31 +132,32 @@ def main():
             dist_km = round(dist_m / 1000, 2)
             pace, kmh = calculate_speed_and_pace(dist_m, dur_s)
             
+            # Zeilenstruktur (A bis N)
             row = [
-                start_time,                                 # A
-                activity_name,                              # B
-                activity.get('activityType', {}).get('typeKey', 'n/a'), # C
-                dist_km,                                    # D
-                format_duration(dur_s),                      # E
-                pace,                                       # F
-                kmh,                                        # G
-                activity.get('averageHR', 0),               # H
-                activity.get('calories', 0),                # I
-                round(activity.get('elevationGain', 0), 0), # J
-                weight,                                     # K
-                rhr,                                        # L
-                hrv,                                        # M
-                sleep_hours                                 # N
+                start_time,                                 # A: Datum/Zeit
+                activity_name,                              # B: Name
+                activity.get('activityType', {}).get('typeKey', 'n/a'), # C: Typ
+                dist_km,                                    # D: km
+                format_duration(dur_s),                      # E: Min
+                pace,                                       # F: Pace
+                kmh,                                        # G: km/h
+                activity.get('averageHR', 0),               # H: HF Avg
+                activity.get('calories', 0),                # I: kcal
+                round(activity.get('elevationGain', 0), 0), # J: HM
+                weight,                                     # K: Gewicht (kg)
+                rhr,                                        # L: RHR
+                hrv,                                        # M: HRV
+                sleep_hours                                 # N: Schlaf (h)
             ]
             
             sheet.append_row(row)
-            print(f"✅ Sync Erfolg: {start_time} | {activity_name} (Gewicht: {weight}kg, Schlaf: {sleep_hours}h)")
+            print(f"✅ Erfolg: {activity_name} (Gewicht: {weight}, Schlaf: {sleep_hours}h)")
             new_entries += 1
             
         except Exception as e:
-            print(f"❌ Kritischer Fehler bei Aktivität {start_time}: {e}")
+            print(f"❌ Fehler bei Aktivität {start_time}: {e}")
 
-    print(f"🚀 Fertig! {new_entries} neue Einträge hinzugefügt.")
+    print(f"\n✨ Fertig! {new_entries} neue Aktivitäten synchronisiert.")
 
 if __name__ == "__main__":
     main()
