@@ -9,6 +9,7 @@ def format_duration(seconds):
     return round(seconds / 60, 2) if seconds else 0
 
 def format_sleep(seconds):
+    # Wandelt Schlaf-Sekunden in Stunden um (z.B. 7.5 für 7 Std 30 Min)
     return round(seconds / 3600, 2) if seconds else 0
 
 def calculate_speed_and_pace(distance_meters, duration_seconds):
@@ -22,8 +23,9 @@ def calculate_speed_and_pace(distance_meters, duration_seconds):
     return f"{pace_min}:{pace_sec:02d}", speed_kmh
 
 def main():
-    print("Starte High-End Garmin Sync (Bugfix Body Composition)...")
+    print("Starte High-End Garmin Sync (Final Version)...")
     
+    # Umgebungsvariablen laden
     garmin_email = os.environ.get('GARMIN_EMAIL')
     garmin_password = os.environ.get('GARMIN_PASSWORD')
     google_creds_json = os.environ.get('GOOGLE_CREDENTIALS')
@@ -41,8 +43,10 @@ def main():
         print(f"❌ Garmin Login Fehler: {e}")
         return
     
+    # Aktivitäten abrufen
     activities = garmin.get_activities(0, 15)
 
+    # Google Sheets Verbindung
     try:
         creds_dict = json.loads(google_creds_json)
         creds = Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
@@ -56,9 +60,7 @@ def main():
     existing_data = sheet.get_all_values()
     existing_ids = [row[0] + row[1] for row in existing_data[1:]] if len(existing_data) > 1 else []
 
-    today = datetime.now().date().isoformat()
     new_entries = 0
-
     for activity in activities:
         try:
             start_time = activity.get('startTimeLocal', '')
@@ -69,60 +71,79 @@ def main():
 
             act_date = start_time[:10]
 
-            # Gesundheitsdaten abrufen
+            # --- GESUNDHEITSDATEN SEKTION ---
+            weight = 0
+            rhr = 0
+            hrv = 'N/A'
+            sleep_hours = 0
+
             try:
+                # 1. Ruhepuls
                 stats = garmin.get_stats(act_date)
                 rhr = stats.get('restingHeartRate', 0)
                 
-                # FIX: Wir übergeben das heutige Datum, um den aktuellsten Stand zu erhalten
-                body_composition = garmin.get_body_composition(today) 
-                weight = 0
-                if body_composition:
-                    weight_raw = body_composition.get('totalWeight') or body_composition.get('weight') or 0
-                    if weight_raw > 1000:
-                        weight = round(weight_raw / 1000, 2)
+                # 2. Gewicht (Mehrstufige Abfrage)
+                body_data = garmin.get_body_composition(act_date)
+                weight_raw = None
+                
+                if body_data:
+                    # Checke Liste (Standard-API) oder Direkt-Feld
+                    if 'bodyCompositionList' in body_data and body_data['bodyCompositionList']:
+                        weight_raw = body_data['bodyCompositionList'][0].get('weight')
                     else:
-                        weight = round(weight_raw, 2)
+                        weight_raw = body_data.get('totalWeight') or body_data.get('weight')
+
+                # Fallback: Wenn kein Gewicht für den Tag, nimm das letzte aus dem Profil
+                if not weight_raw:
+                    profile = garmin.get_user_profile()
+                    weight_raw = profile.get('weight', 0)
+
+                if weight_raw:
+                    weight = round(weight_raw / 1000, 2) if weight_raw > 1000 else round(weight_raw, 2)
                 
+                # 3. HRV (Herzfrequenzvariabilität)
                 hrv_data = garmin.get_hrv_data(act_date)
-                hrv = hrv_data.get('hrvSummary', {}).get('lastNightAvg', 'N/A') if hrv_data else 'N/A'
+                if hrv_data:
+                    hrv = hrv_data.get('hrvSummary', {}).get('lastNightAvg', 'N/A')
                 
+                # 4. Schlafzeit
                 sleep_data = garmin.get_sleep_data(act_date)
-                sleep_seconds = sleep_data.get('dailySleepDTO', {}).get('sleepTimeSeconds', 0) if sleep_data else 0
-                sleep_hours = format_sleep(sleep_seconds)
+                if sleep_data:
+                    sleep_seconds = sleep_data.get('dailySleepDTO', {}).get('sleepTimeSeconds', 0)
+                    sleep_hours = format_sleep(sleep_seconds)
 
             except Exception as health_e:
-                print(f"⚠️ Hinweis: Gesundheitsdaten unvollständig für {act_date}: {health_e}")
-                weight, rhr, hrv, sleep_hours = 0, 0, 'N/A', 0
+                print(f"⚠️ Hinweis: Teilweise Gesundheitsdaten für {act_date} nicht verfügbar.")
 
+            # --- AKTIVITÄTSDATEN SEKTION ---
             dist_m = activity.get('distance', 0)
             dur_s = activity.get('duration', 0)
             dist_km = round(dist_m / 1000, 2)
             pace, kmh = calculate_speed_and_pace(dist_m, dur_s)
             
             row = [
-                start_time,
-                activity_name,
-                activity.get('activityType', {}).get('typeKey', 'n/a'),
-                dist_km,
-                format_duration(dur_s),
-                pace,
-                kmh,
-                activity.get('averageHR', 0),
-                activity.get('calories', 0),
-                round(activity.get('elevationGain', 0), 0),
-                weight,
-                rhr,
-                hrv,
-                sleep_hours
+                start_time,                                 # A
+                activity_name,                              # B
+                activity.get('activityType', {}).get('typeKey', 'n/a'), # C
+                dist_km,                                    # D
+                format_duration(dur_s),                      # E
+                pace,                                       # F
+                kmh,                                        # G
+                activity.get('averageHR', 0),               # H
+                activity.get('calories', 0),                # I
+                round(activity.get('elevationGain', 0), 0), # J
+                weight,                                     # K
+                rhr,                                        # L
+                hrv,                                        # M
+                sleep_hours                                 # N
             ]
             
             sheet.append_row(row)
-            print(f"✅ Sync Erfolg: {start_time} | {activity_name}")
+            print(f"✅ Sync Erfolg: {start_time} | {activity_name} (Gewicht: {weight}kg, Schlaf: {sleep_hours}h)")
             new_entries += 1
             
         except Exception as e:
-            print(f"❌ Fehler bei Aktivität {start_time}: {e}")
+            print(f"❌ Kritischer Fehler bei Aktivität {start_time}: {e}")
 
     print(f"🚀 Fertig! {new_entries} neue Einträge hinzugefügt.")
 
