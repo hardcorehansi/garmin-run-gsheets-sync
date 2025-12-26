@@ -1,12 +1,12 @@
-name: Garmin to Google Sheets Sync
+name: Garmin to Google Sheets Sync & Dashboard
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Runs daily at 6 AM UTC
-  workflow_dispatch:  # Allows manual trigger from GitHub UI
+    - cron: '0 6 * * *'  # Läuft täglich um 06:00 UTC (07:00 Uhr deutscher Zeit)
+  workflow_dispatch:     # Erlaubt manuelles Starten über den Button bei GitHub
 
 jobs:
-  sync:
+  sync_and_dashboard:
     runs-on: ubuntu-latest
     
     steps:
@@ -20,12 +20,18 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install garminconnect gspread google-auth pandas
       
-      - name: Run sync script
+      - name: Run Garmin Sync
         env:
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-        run: python sync_garmin.py
+        run: python sync_garmin.py  # Dein Haupt-Sync-Skript
+
+      - name: Run Dashboard Update
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: python dashboard.py    # Das neue Dashboard-Skript
