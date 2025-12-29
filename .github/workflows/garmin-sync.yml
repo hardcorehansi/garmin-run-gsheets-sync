@@ -2,7 +2,7 @@ name: Garmin to Google Sheets Sync & Dashboard
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Läuft täglich um 06:00 UTC (07:00 Uhr deutscher Zeit)
+  ##  - cron: '0 6 * * *'  # Läuft täglich um 06:00 UTC (07:00 Uhr deutscher Zeit)
   workflow_dispatch:     # Erlaubt manuelles Starten über den Button bei GitHub
 
 jobs:
